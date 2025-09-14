@@ -3,27 +3,54 @@
    xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
    xmlns:xs="http://www.w3.org/2001/XMLSchema"
    xmlns:tei="http://www.tei-c.org/ns/1.0"
+   xmlns:map="http://www.w3.org/2005/xpath-functions/map"
    xmlns="http://www.tei-c.org/ns/1.0"
    exclude-result-prefixes="#all"
    version="3.0">
    
-   <xsl:output indent="1"/>
+<!--   <xsl:output indent="1"/>-->
+   
+   <xsl:variable name="langs" as="xs:string+">
+      <xsl:variable name="values" as="xs:string+">
+         <xsl:for-each select="//@style">
+            <xsl:analyze-string select="." regex="lang: [^;]+;">
+               <xsl:matching-substring>
+                  <xsl:value-of select="."/>
+               </xsl:matching-substring>
+            </xsl:analyze-string>
+         </xsl:for-each>
+      </xsl:variable>
+      
+      <xsl:for-each-group select="$values" group-by="." >
+         <xsl:sort select="count(current-group())" order="descending"/>
+         <xsl:value-of select="substring-after(., ': ') => substring-before(';')" />
+      </xsl:for-each-group>
+   </xsl:variable>
    
    <xsl:template match="*[tei:hi]">
       <xsl:copy>
          <xsl:sequence select="@*"/>
-         <xsl:apply-templates />
+         <xsl:apply-templates select="*" />
       </xsl:copy>
    </xsl:template>
    
    <xsl:template match="tei:hi">
-      <xsl:variable name="style">
+      <xsl:variable name="style" as="attribute()*">
          <xsl:apply-templates select="@style" />
       </xsl:variable>
       
       <xsl:choose>
-         <xsl:when test="string-length($style) gt 0">
-            <hi style="{$style}">
+         <xsl:when test="$style[local-name() = 'style']">
+            <hi style="{$style[local-name() = 'style']}">
+               <xsl:if test="$style[local-name() = 'lang'] != $langs[1]">
+                  <xsl:sequence select="$style[local-name() = 'lang']" />
+               </xsl:if>
+               <xsl:apply-templates />
+            </hi>
+         </xsl:when>
+         <xsl:when test="$style[local-name() = 'lang'] != $langs[1]">
+            <hi>
+               <xsl:sequence select="$style[local-name() = 'lang']" />
                <xsl:apply-templates />
             </hi>
          </xsl:when>
@@ -33,15 +60,29 @@
       </xsl:choose>
    </xsl:template>
    
-   <xsl:template match="@style">
+   <xsl:template match="@style" as="attribute()*">
+      <xsl:variable name="tokens" as="map(*)">
+         <xsl:map>
+            <xsl:for-each select="tokenize(., ';')">
+               <xsl:variable name="key" select="normalize-space(substring-before(., ':'))"/>
+               <xsl:variable name="val" select="normalize-space(substring-after(., ':'))"/>
+               <xsl:if test="$key != ''">
+                  <xsl:map-entry key="$key" select="normalize-space(substring-after(., ':'))" />
+               </xsl:if>
+            </xsl:for-each>
+         </xsl:map>
+      </xsl:variable> 
       <xsl:variable name="values" as="xs:string*">
-         <xsl:for-each select="tokenize(., ';')">
-            <xsl:variable name="key" select="normalize-space(substring-before(., ':'))"/>
-            <xsl:variable name="val" select="normalize-space(substring-after(., ':'))"/>
+         <xsl:for-each select="map:keys($tokens)">
+            <xsl:variable name="key" select="." />
+            <xsl:variable name="val" select="$tokens(.)"/>
+<!--            <xsl:variable name="key" select="normalize-space(substring-before(., ':'))"/>-->
+<!--            <xsl:variable name="val" select="normalize-space(substring-after(., ':'))"/>-->
             
             <xsl:choose>
                <xsl:when test=". eq ' ' or . eq ''"/>
                <xsl:when test="$key eq 'outlineLvl'"/>
+               <xsl:when test="$key eq 'lang'" />
                
                <xsl:when test="$key eq 'b' and $val = ('', '1')">font-weight: bold</xsl:when>
                <xsl:when test="$key eq 'i' and $val = ('', '1')">font-style: italic</xsl:when>
@@ -92,7 +133,7 @@
                </xsl:when>
                
                <xsl:otherwise>
-                  <xsl:value-of select="."/>
+                  <xsl:value-of select="$key || ': ' || $val"/>
                </xsl:otherwise>
             </xsl:choose>
          </xsl:for-each>
@@ -100,8 +141,43 @@
       
       <xsl:variable name="styleValue" select="string-join($values, '; ')"/>
       <xsl:if test="string-length($styleValue) gt 0">
-         <xsl:value-of select="$styleValue || ';'"/>
+         <xsl:attribute name="style" select="$styleValue || ';'"/>
       </xsl:if>
+      <xsl:if test="$tokens?lang">
+         <xsl:attribute name="xml:lang" select="$tokens?lang" />
+      </xsl:if>
+   </xsl:template>
+   
+   <xsl:template match="tei:teiHeader[not(tei:profileDesc)]">
+      <teiHeader>
+         <xsl:apply-templates />
+         <profileDesc>
+            <langUsage>
+               <xsl:call-template name="langs" />
+            </langUsage>
+         </profileDesc>
+      </teiHeader>
+   </xsl:template>
+   
+   <xsl:template match="tei:profileDesc[not(tei:langUsage)]">
+      <profileDesc>
+         <xsl:apply-templates />
+         <langUsage>
+            <xsl:call-template name="langs" />
+         </langUsage>
+      </profileDesc>
+   </xsl:template>
+   
+   <xsl:template match="tei:langUsage[not(tei:language)]">
+      <langUsage>
+         <xsl:call-template name="langs" />
+      </langUsage>
+   </xsl:template>
+   
+   <xsl:template name="langs">
+      <xsl:for-each select="$langs">
+         <language ident="{.}" />
+      </xsl:for-each>
    </xsl:template>
    
    <xsl:template match="@* | node()">
